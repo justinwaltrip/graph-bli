@@ -33,7 +33,7 @@ def load_wiki_data(lang):
     """
     # TODO remove [:1%]
     # load wiki40b data for language
-    ds = tfds.load(f"wiki40b/{lang}", split="train[:1%]")
+    ds = tfds.load(f"wiki40b/{lang}", split="train[:.00001%]")
 
     # separate samples by special markers
     special_markers = [
@@ -134,6 +134,12 @@ def main():
         adj_matrix_path = Path(f"adj_matrices/{lang}.json")
         adj_matrix_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # In the adjacency matrix, working with words A and B,
+        # A row = p(B|A)
+        # B row = p(A|B)
+        # and vice versa
+        # A col = p(A|B)
+        # B row = p(B|A)
         if adj_matrix_path.exists():
             print(f"Loading adjacency matrix for {lang}")
             with open(adj_matrix_path) as f:
@@ -142,13 +148,43 @@ def main():
             print(f"Computing adjacency matrix for {lang}")
 
             # TODO save word indices
+            word_indices = []
 
             adj_matrix = np.zeros((len(words), len(words)))
             for w1, w2 in tqdm.tqdm(
                 itertools.permutations(words, 2), total=math.perm(len(words), 2)
             ):
-                # TODO add directed edge e from w1 to w2 where w(e) = p(w2|w1) = p(w1, w2) / p(w1) (and vice versa)
-                pass
+                w1_given_w2 = bigram_counts[(w2, w1)]/unigram_counts[w2]
+                w2_given_w1 = bigram_counts[(w1, w2)]/unigram_counts[w1]
+
+                if w1 in word_indices and w2 in word_indices:
+                    adj_matrix[word_indices.index(w1)][word_indices.index(w2)] = w2_given_w1
+                    adj_matrix[word_indices.index(w2)][word_indices.index(w1)] = w1_given_w2
+
+                if w1 not in word_indices and w2 not in word_indices:
+                    word_indices.append(w1)
+                    word_indices.append(w2)
+                    w1_index = word_indices.index(w1)
+                    w2_index = word_indices.index(w2)
+
+                    adj_matrix[w1_index][w2_index] = w2_given_w1
+                    adj_matrix[w2_index][w2_index] = w1_given_w2
+
+                if w1 not in word_indices and w2 in word_indices:
+                    word_indices.append(w1)
+                    w1_index = word_indices.index(w1)
+                    w2_index = word_indices.index(w2)
+
+                    adj_matrix[w1_index][w2_index] = w2_given_w1
+                    adj_matrix[w2_index][w2_index] = w1_given_w2
+
+                if w1 in word_indices and w2 not in word_indices:
+                    word_indices.append(w2)
+                    w1_index = word_indices.index(w1)
+                    w2_index = word_indices.index(w2)
+
+                    adj_matrix[w1_index][w2_index] = w2_given_w1
+                    adj_matrix[w2_index][w2_index] = w1_given_w2 
 
             # TODO update save format for np array
             # save bigram counts
