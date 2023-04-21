@@ -1,3 +1,5 @@
+import time
+import ray
 import numpy as np
 import json
 import math
@@ -62,7 +64,6 @@ def compute_unigram_counts(lang, words, wiki_data):
     """
     unigram_counts = {}
     for w in tqdm.tqdm(words):
-        # TODO parallelize
         # compute monogram count for "w"
         count = 0
         for doc in wiki_data:
@@ -72,20 +73,50 @@ def compute_unigram_counts(lang, words, wiki_data):
     return unigram_counts
 
 
-def compute_bigram_counts(lang, words, wiki_data):
+@ray.remote
+def count_bigrams(bigrams, wiki_data):
     """
-    Compute bigram counts for words in a language
+    Compute bigram count for words in a language
     """
     bigram_counts = {}
-    for w1, w2 in tqdm.tqdm(
-        itertools.permutations(words, 2), total=math.perm(len(words), 2)
-    ):
-        # TODO parallelize
-        # compute bigram count for "w1 w2"
+    
+    for w1, w2 in bigrams:
         count = 0
         for doc in wiki_data:
             count += doc.count(f"{w1} {w2}")
         bigram_counts[str((w1, w2))] = count
+    
+    return bigram_counts
+
+
+def _count_bigram(w1, w2, wiki_data):
+    """
+    Compute bigram count for words in a language
+    """
+    count = 0
+    for doc in wiki_data:
+        count += doc.count(f"{w1} {w2}")
+    return count
+
+
+def compute_bigram_counts(lang, words, wiki_data):
+    """
+    Compute bigram counts for words in a language
+    """
+    ray.init()
+
+    bigram_counts = {}
+
+    batch_size = 100
+    perms = list(itertools.permutations(words, 2))
+
+    results = []
+    for i in range(math.perm(len(words), 2) // batch_size + 1):
+        bigrams = perms[i * batch_size : (i + 1) * batch_size]
+        results.append(count_bigrams.remote(bigrams, wiki_data))
+    
+    for result in tqdm.tqdm(results):
+        bigram_counts.update(ray.get(result))
 
     return bigram_counts
 
@@ -174,7 +205,7 @@ def main():
         wiki_data = load_wiki_data(lang)
 
         # TODO remove
-        wiki_data = wiki_data[:10000]
+        wiki_data = wiki_data[:100000]
 
         unigram_counts = get_unigram_counts(lang, words, wiki_data)
         bigram_counts = get_bigram_counts(lang, words, wiki_data)
