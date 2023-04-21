@@ -33,7 +33,7 @@ def load_wiki_data(lang):
     """
     # TODO remove [:1%]
     # load wiki40b data for language
-    ds = tfds.load(f"wiki40b/{lang}", split="train[:.00001%]")
+    ds = tfds.load(f"wiki40b/{lang}", split="train[:1%]")
 
     # separate samples by special markers
     special_markers = [
@@ -56,6 +56,100 @@ def load_wiki_data(lang):
     return wiki_data
 
 
+def compute_unigram_counts(lang, words, wiki_data):
+    """
+    Compute unigram counts for words in a language
+    """
+    unigram_counts = {}
+    for w in tqdm.tqdm(words):
+        # TODO parallelize
+        # compute monogram count for "w"
+        count = 0
+        for doc in wiki_data:
+            count += doc.count(w)
+        unigram_counts[w] = count
+
+    return unigram_counts
+
+
+def compute_bigram_counts(lang, words, wiki_data):
+    """
+    Compute bigram counts for words in a language
+    """
+    bigram_counts = {}
+    for w1, w2 in tqdm.tqdm(
+        itertools.permutations(words, 2), total=math.perm(len(words), 2)
+    ):
+        # TODO parallelize
+        # compute bigram count for "w1 w2"
+        count = 0
+        for doc in wiki_data:
+            count += doc.count(f"{w1} {w2}")
+        bigram_counts[str((w1, w2))] = count
+
+    return bigram_counts
+
+
+def get_unigram_counts(lang, words, wiki_data):
+    """
+    Load unigram counts for words in a language
+    """
+    unigram_path = Path(f"unigram_counts/{lang}.json")
+    unigram_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if unigram_path.exists():
+        print(f"Loading unigram counts for {lang}")
+        with open(unigram_path) as f:
+            unigram_counts = json.load(f)
+    else:
+        print(f"Computing unigram counts for {lang}")
+
+        unigram_counts = compute_unigram_counts(lang, words, wiki_data)
+
+        # save unigram counts
+        with open(unigram_path, "w") as f:
+            json.dump(unigram_counts, f, indent=4)
+
+    return unigram_counts
+
+
+def get_bigram_counts(lang, words, wiki_data):
+    """
+    Load bigram counts for words in a language
+    """
+    bigram_path = Path(f"bigram_counts/{lang}.json")
+    bigram_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if bigram_path.exists():
+        print(f"Loading bigram counts for {lang}")
+        with open(bigram_path) as f:
+            bigram_counts = json.load(f)
+    else:
+        print(f"Computing bigram counts for {lang}")
+
+        bigram_counts = compute_bigram_counts(lang, words, wiki_data)
+
+        # save bigram counts
+        with open(bigram_path, "w") as f:
+            json.dump(bigram_counts, f, indent=4)
+
+    return bigram_counts
+
+
+def save_word_indices(lang, words):
+    """
+    Save word indices for a language
+    """
+    word_ix_path = Path(f"word_indices/{lang}.json")
+    word_ix_path.parent.mkdir(parents=True, exist_ok=True)
+
+    word_ix = {w: i for i, w in enumerate(words)}
+
+    # save word indices
+    with open(word_ix_path, "w") as f:
+        json.dump(word_ix, f, indent=4)
+
+
 def main():
     """
     1. Load bilingual dictionaries for relvant language comparisons
@@ -73,8 +167,8 @@ def main():
     )
 
     # TODO remove
-    src_words = list(src_words)[:10]
-    trg_words = list(trg_words)[:10]
+    src_words = list(sorted(src_words))[:50]
+    trg_words = list(sorted(trg_words))[:50]
 
     for lang, words in [(src, src_words), (trg, trg_words)]:
         wiki_data = load_wiki_data(lang)
@@ -82,114 +176,49 @@ def main():
         # TODO remove
         wiki_data = wiki_data[:10000]
 
-        unigram_path = Path(f"unigram_counts/{lang}.json")
-        unigram_path.parent.mkdir(parents=True, exist_ok=True)
+        unigram_counts = get_unigram_counts(lang, words, wiki_data)
+        bigram_counts = get_bigram_counts(lang, words, wiki_data)
 
-        if unigram_path.exists():
-            print(f"Loading unigram counts for {lang}")
-            with open(unigram_path) as f:
-                unigram_counts = json.load(f)
-        else:
-            print(f"Computing unigram counts for {lang}")
-
-            unigram_counts = {}
-            for w in tqdm.tqdm(words):
-                # TODO parallelize
-                # compute monogram count for "w"
-                count = 0
-                for doc in wiki_data:
-                    count += doc.count(w)
-                unigram_counts[w] = count
-
-            # save unigram counts
-            with open(unigram_path, "w") as f:
-                json.dump(unigram_counts, f, indent=4)
-
-        bigram_path = Path(f"bigram_counts/{lang}.json")
-        bigram_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if bigram_path.exists():
-            print(f"Loading bigram counts for {lang}")
-            with open(bigram_path) as f:
-                bigram_counts = json.load(f)
-        else:
-            print(f"Computing bigram counts for {lang}")
-
-            bigram_counts = {}
-            for w1, w2 in tqdm.tqdm(
-                itertools.permutations(words, 2), total=math.perm(len(words), 2)
-            ):
-                # TODO parallelize
-                # compute bigram count for "w1 w2"
-                count = 0
-                for doc in wiki_data:
-                    count += doc.count(f"{w1} {w2}")
-                bigram_counts[(w1, w2)] = count
-
-            # save bigram counts
-            with open(bigram_path, "w") as f:
-                json.dump(bigram_counts, f, indent=4)
+        # save word indices used for adjacency matrix
+        save_word_indices(lang, words)
 
         # create directed adjacency matrix
-        adj_matrix_path = Path(f"adj_matrices/{lang}.json")
+        adj_matrix_path = Path(f"adj_matrices/{lang}.npy")
         adj_matrix_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # In the adjacency matrix, working with words A and B,
-        # A row = p(B|A)
-        # B row = p(A|B)
-        # and vice versa
-        # A col = p(A|B)
-        # B row = p(B|A)
         if adj_matrix_path.exists():
             print(f"Loading adjacency matrix for {lang}")
             with open(adj_matrix_path) as f:
-                adj_matrix = json.load(f)
+                adj_matrix = np.load(f)
         else:
             print(f"Computing adjacency matrix for {lang}")
-
-            # TODO save word indices
-            word_indices = []
 
             adj_matrix = np.zeros((len(words), len(words)))
             for w1, w2 in tqdm.tqdm(
                 itertools.permutations(words, 2), total=math.perm(len(words), 2)
             ):
-                w1_given_w2 = bigram_counts[(w2, w1)]/unigram_counts[w2]
-                w2_given_w1 = bigram_counts[(w1, w2)]/unigram_counts[w1]
+                w1_ix = words.index(w1)
+                w2_ix = words.index(w2)
 
-                if w1 in word_indices and w2 in word_indices:
-                    adj_matrix[word_indices.index(w1)][word_indices.index(w2)] = w2_given_w1
-                    adj_matrix[word_indices.index(w2)][word_indices.index(w1)] = w1_given_w2
+                # compute p(w2|w1) and p(w1|w2)
+                if unigram_counts[w1] != 0:
+                    w2_given_w1 = bigram_counts[str((w1, w2))] / unigram_counts[w1]
+                else:
+                    w2_given_w1 = 0
+                if unigram_counts[w2] != 0:
+                    w1_given_w2 = bigram_counts[str((w2, w1))] / unigram_counts[w2]
+                else:
+                    w1_given_w2 = 0
 
-                if w1 not in word_indices and w2 not in word_indices:
-                    word_indices.append(w1)
-                    word_indices.append(w2)
-                    w1_index = word_indices.index(w1)
-                    w2_index = word_indices.index(w2)
+                # add directed edge from w1 to w2
+                adj_matrix[w1_ix][w2_ix] = w2_given_w1
 
-                    adj_matrix[w1_index][w2_index] = w2_given_w1
-                    adj_matrix[w2_index][w2_index] = w1_given_w2
+                # add directed edge from w2 to w1
+                adj_matrix[w2_ix][w1_ix] = w1_given_w2
 
-                if w1 not in word_indices and w2 in word_indices:
-                    word_indices.append(w1)
-                    w1_index = word_indices.index(w1)
-                    w2_index = word_indices.index(w2)
-
-                    adj_matrix[w1_index][w2_index] = w2_given_w1
-                    adj_matrix[w2_index][w2_index] = w1_given_w2
-
-                if w1 in word_indices and w2 not in word_indices:
-                    word_indices.append(w2)
-                    w1_index = word_indices.index(w1)
-                    w2_index = word_indices.index(w2)
-
-                    adj_matrix[w1_index][w2_index] = w2_given_w1
-                    adj_matrix[w2_index][w2_index] = w1_given_w2 
-
-            # TODO update save format for np array
-            # save bigram counts
-            with open(bigram_path, "w") as f:
-                json.dump(adj_matrix, f, indent=4)
+            # save adjacency matrix
+            with open(adj_matrix_path, "w") as f:
+                np.save(f, adj_matrix)
 
 
 if __name__ == "__main__":
