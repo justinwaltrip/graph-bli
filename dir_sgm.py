@@ -540,6 +540,37 @@ def iterative_softsgm(
     )
 
 
+def pairs_to_embpos(pairs, src_word2ind, trg_word2ind):
+    """Translates a list of (srcwd, trgwd) tuples to a list of
+    (src_pos, trg_pos) from the embedding space.
+
+    Args:
+        pairs: list of (srcwd, trgwd) tuples
+        src_word2ind: source word to index dictionary.
+        trg_word2ind: target word to index dictionary.
+
+    Returns:
+        List of (src_pos, trg_pos) from the embedding space.
+
+    """
+    return list(map(lambda x: (src_word2ind[x[0]], trg_word2ind[x[1]]), pairs))
+
+
+def create_train_dev_split(pairs, n_seeds, src_word2ind, trg_word2ind, rand=False):
+    # Separates input pairs into a train/dev split.
+    # Returns tuples of ([src/trg]_train_inds, [src/trg]_dev_inds)
+    # If rand=True, randomize seeds picked. Otherwise, choose in order.
+    print("Creating the train/dev split given input seeds...")
+    if rand:
+        random.shuffle(pairs)
+    train_pairs = pairs[:n_seeds]
+    dev_pairs = pairs[n_seeds:]
+    train_inds = pairs_to_embpos(train_pairs, src_word2ind, trg_word2ind)
+    dev_inds = pairs_to_embpos(dev_pairs, src_word2ind, trg_word2ind)
+    print("Done creating the train/dev split given input seeds.")
+    return (train_pairs, dev_pairs), (train_inds, dev_inds)
+
+
 def main():
     """
     1. Load bilingual dictionaries for relvant language comparisons
@@ -551,10 +582,25 @@ def main():
     """
     src = "en"
     trg = "de"
+    n_seeds = 100
+    randomize_seeds = True
+    softsgm_iters = 1
+    k = 1  # how many hypotheses to return per source word
+    min_prob = 0.0  # min prob to consider for softsgm
+    new_nseeds_per_round = -1  # number of seeds to add per round in iterative runs
+    iterative_softsgm_iters = 1  # number of iterations to run iterative softsgm
+    diff_seeds_for_rev = False  # when running matching in reverse, regenerate seeds
+    active_learning = False  # whether to use active learning
 
     word_pairs, src_words, trg_words = process_dict_pairs(
         f"dicts/{src}-{trg}/train/{src}-{trg}.0-5000.txt.1to1"
     )
+    src_word2ind = {word: i for i, word in enumerate(src_words)}
+    trg_word2ind = {word: i for i, word in enumerate(trg_words)}
+    _, (train_inds, dev_inds) = create_train_dev_split(
+        word_pairs, n_seeds, src_word2ind, trg_word2ind, randomize_seeds
+    )
+    gold_src_train_inds, gold_trg_train_inds = unzip_pairs(train_inds)
 
     # TODO remove
     src_words = list(sorted(src_words))[:50]
@@ -578,6 +624,34 @@ def main():
         adj_matrices[lang] = get_adj_matrix(lang, words, unigram_counts, bigram_counts)
 
     # run SGM on adjacency matrices
+    hyps, _, _ = iterative_softsgm(
+        adj_matrices[src],
+        adj_matrices[trg],
+        gold_src_train_inds,
+        gold_trg_train_inds,
+        gold_src_train_inds,
+        gold_trg_train_inds,
+        softsgm_iters,
+        k,
+        min_prob,
+        dev_inds,
+        new_nseeds_per_round,
+        curr_i=1,
+        total_i=iterative_softsgm_iters,
+        diff_seeds_for_rev=diff_seeds_for_rev,
+        active_learning=active_learning,
+        truth_for_active_learning=set(train_inds + dev_inds),
+    )
+
+    dev_src_inds, dev_trg_inds = unzip_pairs(dev_inds)
+    dev_hyps = set(hyp for hyp in hyps if hyp[0] in dev_src_inds)
+    matches, precision, recall = eval(dev_hyps, dev_inds)
+    print(
+        "\tDev Pairs matched: {0} \n\t(Precision; {1}%) (Recall: {2}%)".format(
+            len(matches), precision, recall
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
