@@ -55,13 +55,13 @@ def plot_clusters(input: np.array, theta: float, k: int, n_classes: int, embeddi
 	if n_components == 2:
 	  for i in n_clusters:
 	    plt.scatter(tsne_results[z[0] == 1 , 0] , tsne_results[z[0] == 1 , 1] , label = i)
-	    plt.scatter(np.mean(tsne_results[z[0] == 1 , 0]) , np.mean(tsne_results[z[0] == 1 , 1]) , s = 80, color = 'k)
+	    plt.scatter(np.mean(tsne_results[z[0] == 1 , 0]) , np.mean(tsne_results[z[0] == 1 , 1]) , s = 80, color = 'k')
 	elif n_components == 3:
           fig = plt.figure(figsize=(12, 12))
 	  ax = fig.add_subplot(projection='3d')
 	  for i in n_clusters:
             ax.scatter(tsne_results[z[0] == 1 , 0] , tsne_results[z[0] == 1 , 1] , tsne_results[z[0] == 1 , 2] , label = i)
-            ax.scatter(np.mean(tsne_results[z[0] == 1 , 0]) , np.mean(tsne_results[z[0] == 1 , 1]) , np.mean(tsne_results[z[0] == 1 , 2]) ,  s = 80, color = 'k)
+            ax.scatter(np.mean(tsne_results[z[0] == 1 , 0]) , np.mean(tsne_results[z[0] == 1 , 1]) , np.mean(tsne_results[z[0] == 1 , 2]) ,  s = 80, color = 'k')
 	plt.legend()
 	plt.show()  
 
