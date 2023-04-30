@@ -6,3 +6,4 @@ word_indices
 **/__pycache__
 exps
 adj_matrices
+*.out

@@ -52,3 +52,10 @@ IterProc from Table 5):
 Output will be streamed to stdout. P@1 for -PullSGM for this example will be
 seen at the end of program running. For -PullProc, one reads the P@1 for the
 Forward direction of the last run of Iterative Procrustes. 
+
+### Slurm Commands
+
+```
+sbatch launchpad.sh
+watch -n1 squeue -u jwaltri2
+```

@@ -56,9 +56,10 @@ def load_wiki_data(lang):
     """
     Load fastText wiki data for relevant languages
     """
-    # TODO remove [:1%]
+    print(f"Loading wiki data for {lang}")
+
     # load wiki40b data for language
-    ds = tfds.load(f"wiki40b/{lang}", split="train[:1%]")
+    ds = tfds.load(f"wiki40b/{lang}", split="train[:10%]", data_dir="/scratch4/danielk/jwaltri2")
 
     # separate samples by special markers
     special_markers = [
@@ -68,15 +69,16 @@ def load_wiki_data(lang):
         "_NEWLINE_",
     ]
 
-    # TODO add tqdm
     wiki_data = []
-    for example in ds:
+    for example in tqdm.tqdm(ds):
         text = example["text"].numpy().decode("utf-8")
         text = text.replace("\n", "")
         for marker in special_markers:
             text = text.replace(marker, "[SEP]")
         docs = list(filter(lambda x: x != "", text.split("[SEP]")))
         wiki_data.extend(docs)
+    
+    print(f"Loaded {len(wiki_data)} documents")
 
     return wiki_data
 
@@ -90,25 +92,28 @@ def compute_unigram_counts(words, wiki_data):
         # compute monogram count for "w"
         count = 0
         for doc in wiki_data:
-            # TODO ensure w is not a substring of another word
-            count += doc.count(w)
+            # ensure w is not a substring of another word
+            count += doc.count(f" {w} ")
         unigram_counts[w] = count
 
     return unigram_counts
 
 
 @ray.remote
-def count_bigrams(bigrams, wiki_data):
+def count_bigrams(bigrams, wiki_data_id):
     """
     Compute bigram count for words in a language
     """
+    # get wiki data from shared memory
+    wiki_data = ray.get(wiki_data_id)
+
     bigram_counts = {}
     
     for w1, w2 in bigrams:
         count = 0
         for doc in wiki_data:
-            # TODO ensure w1 w2 are both not substrings of another word
-            count += doc.count(f"{w1} {w2}")
+            # ensure w1 w2 are both not substrings of another word
+            count += doc.count(f" {w1} {w2} ")
         bigram_counts[str((w1, w2))] = count
     
     return bigram_counts
@@ -120,6 +125,9 @@ def compute_bigram_counts(words, wiki_data):
     """
     ray.init(ignore_reinit_error=True)
 
+    # put wiki data in shared memory
+    wiki_data_id = ray.put(wiki_data)
+
     bigram_counts = {}
 
     batch_size = 100
@@ -128,7 +136,7 @@ def compute_bigram_counts(words, wiki_data):
     results = []
     for i in range(math.perm(len(words), 2) // batch_size + 1):
         bigrams = perms[i * batch_size : (i + 1) * batch_size]
-        results.append(count_bigrams.remote(bigrams, wiki_data))
+        results.append(count_bigrams.remote(bigrams, wiki_data_id))
     
     for result in tqdm.tqdm(results):
         bigram_counts.update(ray.get(result))
@@ -152,6 +160,8 @@ def get_unigram_counts(lang, words, wiki_data):
 
         unigram_counts = compute_unigram_counts(words, wiki_data)
 
+        print(f"Saving unigram counts for {lang}")
+
         # save unigram counts
         with open(unigram_path, "w") as f:
             json.dump(unigram_counts, f, indent=4)
@@ -174,6 +184,8 @@ def get_bigram_counts(lang, words, wiki_data):
         print(f"Computing bigram counts for {lang}")
 
         bigram_counts = compute_bigram_counts(words, wiki_data)
+
+        print(f"Saving bigram counts for {lang}")
 
         # save bigram counts
         with open(bigram_path, "w") as f:
@@ -232,6 +244,8 @@ def get_adj_matrix(lang, words, unigram_counts, bigram_counts):
 
             # add directed edge from w2 to w1
             adj_matrix[w2_ix][w1_ix] = w1_given_w2
+        
+        print(f"Saving adjacency matrix for {lang}")
 
         # save adjacency matrix
         with open(adj_matrix_path, "wb") as f:
@@ -609,18 +623,15 @@ def main(args):
         f"dicts/{src}-{trg}/train/{src}-{trg}.0-5000.txt.1to1"
     )
 
-    # TODO remove
+    # TODO remove 100 nodes per graph
     word_pairs = word_pairs[:100]
-
-    # TODO remove
-    # get only the words that appear in the word pairs
     src_words = [pair[0] for pair in word_pairs]
     trg_words = [pair[1] for pair in word_pairs]
 
     src_word2ind = {word: i for i, word in enumerate(src_words)}
     trg_word2ind = {word: i for i, word in enumerate(trg_words)}
 
-    # TODO uncomment
+    # TODO remove 10 seeds
     # _, (train_inds, dev_inds) = create_train_dev_split(
     #     word_pairs, args.n_seeds, src_word2ind, trg_word2ind, args.randomize_seeds
     # )
@@ -634,9 +645,6 @@ def main(args):
 
     for lang, words in [(src, src_words), (trg, trg_words)]:
         wiki_data = load_wiki_data(lang)
-
-        # TODO remove
-        wiki_data = wiki_data[:100000]
 
         unigram_counts = get_unigram_counts(lang, words, wiki_data)
         bigram_counts = get_bigram_counts(lang, words, wiki_data)
