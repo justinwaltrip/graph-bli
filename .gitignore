@@ -3,3 +3,6 @@
 bigram_counts
 unigram_counts
 word_indices
+**/__pycache__
+exps
+adj_matrices

@@ -1,4 +1,7 @@
 git clone https://github.com/microsoft/graspologic.git
+cd graspologic
+git checkout e0761140adc50617d90cfeaa8cde63264fb1fb54
+cd ..
 echo > graspologic/graspologic/__init__.py
 
 git clone https://github.com/artetxem/vecmap.git

@@ -1,3 +1,4 @@
+import argparse
 import random
 import sgm
 import ray
@@ -89,6 +90,7 @@ def compute_unigram_counts(words, wiki_data):
         # compute monogram count for "w"
         count = 0
         for doc in wiki_data:
+            # TODO ensure w is not a substring of another word
             count += doc.count(w)
         unigram_counts[w] = count
 
@@ -105,6 +107,7 @@ def count_bigrams(bigrams, wiki_data):
     for w1, w2 in bigrams:
         count = 0
         for doc in wiki_data:
+            # TODO ensure w1 w2 are both not substrings of another word
             count += doc.count(f"{w1} {w2}")
         bigram_counts[str((w1, w2))] = count
     
@@ -115,7 +118,7 @@ def compute_bigram_counts(words, wiki_data):
     """
     Compute bigram counts for words in a language
     """
-    ray.init()
+    ray.init(ignore_reinit_error=True)
 
     bigram_counts = {}
 
@@ -202,7 +205,7 @@ def get_adj_matrix(lang, words, unigram_counts, bigram_counts):
 
     if adj_matrix_path.exists():
         print(f"Loading adjacency matrix for {lang}")
-        with open(adj_matrix_path) as f:
+        with open(adj_matrix_path, "rb") as f:
             adj_matrix = np.load(f)
     else:
         print(f"Computing adjacency matrix for {lang}")
@@ -231,8 +234,10 @@ def get_adj_matrix(lang, words, unigram_counts, bigram_counts):
             adj_matrix[w2_ix][w1_ix] = w1_given_w2
 
         # save adjacency matrix
-        with open(adj_matrix_path, "w") as f:
+        with open(adj_matrix_path, "wb") as f:
             np.save(f, adj_matrix)
+    
+    return adj_matrix
 
 
 def unzip_pairs(pairs):
@@ -400,6 +405,23 @@ def eval_symm(val_set, hyps, hyps_rev, hyps_int, hyps_gdf=None):
     )
 
 
+def eval(hypotheses, test_set):
+    # Given hypotheses and a test set, returns the matches and percentage
+    # matched.
+    print(
+        "\tLength of hypotheses: {0}\n\tLength of test set: "
+        "{1}".format(len(hypotheses), len(test_set)),
+        flush=True,
+    )
+    matches = set(test_set).intersection(hypotheses)
+    if hypotheses:
+        precision = round((float(len(matches)) / len(hypotheses) * 100), 4)
+    else:
+        precision = None
+    recall = round((float(len(matches)) / len(test_set) * 100), 4)
+    return matches, precision, recall
+
+
 def iterative_softsgm(
     x_sim,
     y_sim,
@@ -540,7 +562,38 @@ def iterative_softsgm(
     )
 
 
-def main():
+def pairs_to_embpos(pairs, src_word2ind, trg_word2ind):
+    """Translates a list of (srcwd, trgwd) tuples to a list of
+    (src_pos, trg_pos) from the embedding space.
+
+    Args:
+        pairs: list of (srcwd, trgwd) tuples
+        src_word2ind: source word to index dictionary.
+        trg_word2ind: target word to index dictionary.
+
+    Returns:
+        List of (src_pos, trg_pos) from the embedding space.
+
+    """
+    return list(map(lambda x: (src_word2ind[x[0]], trg_word2ind[x[1]]), pairs))
+
+
+def create_train_dev_split(pairs, n_seeds, src_word2ind, trg_word2ind, rand=False):
+    # Separates input pairs into a train/dev split.
+    # Returns tuples of ([src/trg]_train_inds, [src/trg]_dev_inds)
+    # If rand=True, randomize seeds picked. Otherwise, choose in order.
+    print("Creating the train/dev split given input seeds...")
+    if rand:
+        random.shuffle(pairs)
+    train_pairs = pairs[:n_seeds]
+    dev_pairs = pairs[n_seeds:]
+    train_inds = pairs_to_embpos(train_pairs, src_word2ind, trg_word2ind)
+    dev_inds = pairs_to_embpos(dev_pairs, src_word2ind, trg_word2ind)
+    print("Done creating the train/dev split given input seeds.")
+    return (train_pairs, dev_pairs), (train_inds, dev_inds)
+
+
+def main(args):
     """
     1. Load bilingual dictionaries for relvant language comparisons
     2. Load fastText wiki data for each language
@@ -549,16 +602,33 @@ def main():
     4. Run SGM on directed adjacency matrices
     5. Evaluate performance
     """
-    src = "en"
-    trg = "de"
+    src = args.src
+    trg = args.trg
 
     word_pairs, src_words, trg_words = process_dict_pairs(
         f"dicts/{src}-{trg}/train/{src}-{trg}.0-5000.txt.1to1"
     )
 
     # TODO remove
-    src_words = list(sorted(src_words))[:50]
-    trg_words = list(sorted(trg_words))[:50]
+    word_pairs = word_pairs[:100]
+
+    # TODO remove
+    # get only the words that appear in the word pairs
+    src_words = [pair[0] for pair in word_pairs]
+    trg_words = [pair[1] for pair in word_pairs]
+
+    src_word2ind = {word: i for i, word in enumerate(src_words)}
+    trg_word2ind = {word: i for i, word in enumerate(trg_words)}
+
+    # TODO uncomment
+    # _, (train_inds, dev_inds) = create_train_dev_split(
+    #     word_pairs, args.n_seeds, src_word2ind, trg_word2ind, args.randomize_seeds
+    # )
+    _, (train_inds, dev_inds) = create_train_dev_split(
+        word_pairs, 10, src_word2ind, trg_word2ind, args.randomize_seeds
+    )
+
+    gold_src_train_inds, gold_trg_train_inds = unzip_pairs(train_inds)
 
     adj_matrices = {}
 
@@ -578,7 +648,119 @@ def main():
         adj_matrices[lang] = get_adj_matrix(lang, words, unigram_counts, bigram_counts)
 
     # run SGM on adjacency matrices
+    hyps, _, _ = iterative_softsgm(
+        adj_matrices[src],
+        adj_matrices[trg],
+        gold_src_train_inds,
+        gold_trg_train_inds,
+        gold_src_train_inds,
+        gold_trg_train_inds,
+        args.softsgm_iters,
+        args.k,
+        args.min_prob,
+        dev_inds,
+        args.new_nseeds_per_round,
+        curr_i=1,
+        total_i=args.iterative_softsgm_iters,
+        diff_seeds_for_rev=args.diff_seeds_for_rev,
+        active_learning=args.active_learning,
+        truth_for_active_learning=set(train_inds + dev_inds),
+    )
+
+    dev_src_inds, dev_trg_inds = unzip_pairs(dev_inds)
+    dev_hyps = set(hyp for hyp in hyps if hyp[0] in dev_src_inds)
+    matches, precision, recall = eval(dev_hyps, dev_inds)
+    print(
+        "\tDev Pairs matched: {0} \n\t(Precision; {1}%) (Recall: {2}%)".format(
+            len(matches), precision, recall
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="LAP Experiments")
+    parser.add_argument(
+        "--src",
+        type=str,
+        required=True,
+        help="Source language (e.g. en, de, es, fr, ru, zh)",
+    )
+    parser.add_argument(
+        "--trg",
+        type=str,
+        required=True,
+        help="Target language (e.g. en, de, es, fr, ru, zh)",
+    )
+    parser.add_argument(
+        "--max-embs",
+        type=int,
+        default=200000,
+        help="Maximum num of word embeddings to use.",
+    )
+    parser.add_argument(
+        "--min-prob",
+        type=float,
+        default=0.0,
+        help="The minimum probability to consider for softsgm",
+    )
+    parser.add_argument(
+        "--pairs", metavar="PATH", required=True, help="train seeds + dev pairs"
+    )
+    parser.add_argument(
+        "--n-seeds", type=int, required=True, help="Num train seeds to use"
+    )
+    parser.add_argument(
+        "--proc-iters",
+        type=int,
+        default=10,
+        help="Rounds of iterative Procrustes to run.",
+    )
+    parser.add_argument(
+        "--iterative-softsgm-iters",
+        type=int,
+        default=1,
+        help="Rounds of iterative SoftSGM to run.",
+    )
+    parser.add_argument(
+        "--softsgm-iters",
+        type=int,
+        default=1,
+        help="Rounds of SoftSGM to run to create probdist.",
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=1,
+        help="How many hypotheses to return per source word.",
+    )
+    parser.add_argument(
+        "--randomize-seeds",
+        action="store_true",
+        help="If set, randomizes the seeds to use (instead of getting them in "
+        "order from args.pairs file)",
+    )
+    parser.add_argument(
+        "--new-nseeds-per-round",
+        metavar="N",
+        type=int,
+        nargs="+",
+        default=-1,
+        help="Number of seeds to add per round in iterative runs.",
+    )
+    parser.add_argument(
+        "--diff-seeds-for-rev",
+        action="store_true",
+        help="When running matching in reverse, regenerate seeds (if there are "
+        "additional input seeds from a previous round, these will then be "
+        "shuffled.",
+    )
+    parser.add_argument(
+        "--active-learning",
+        action="store_true",
+        help="Whether or not to do active learning",
+    )
+
+    args = parser.parse_args()
+
+    main(args)
