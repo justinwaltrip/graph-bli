@@ -4,6 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --time=12:00:00
 #SBATCH --job-name="CS 601.471/671 Project"
+#SBATCH --mem-per-cpu=8G
 
 module load anaconda
 conda activate toy_classification_env 
