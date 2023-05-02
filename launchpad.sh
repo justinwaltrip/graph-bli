@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem-per-cpu=8G
+#SBATCH --mem-per-cpu=4G
 
 module load anaconda
 conda activate toy_classification_env 

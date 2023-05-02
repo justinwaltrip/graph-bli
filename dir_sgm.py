@@ -55,7 +55,7 @@ def process_dict_pairs(pair_file):
 def process_wiki_data(lang):
     # load wiki40b data for language
     ds = tfds.load(
-        f"wiki40b/{lang}", split="train[:5%]", data_dir="/scratch4/danielk/jwaltri2", download=False
+        f"wiki40b/{lang}", split="train[:1%]", data_dir="/scratch4/danielk/jwaltri2", download=False
     )
 
     # separate samples by special markers
@@ -104,7 +104,7 @@ def compute_unigram_counts(words, wiki_data):
 
     unigram_counts = {}
 
-    batch_size = 25
+    batch_size = 100
 
     results = []
     for i in range(math.ceil(len(words) / batch_size)):
@@ -143,7 +143,7 @@ def compute_bigram_counts(words, wiki_data):
 
     bigram_counts = {}
 
-    batch_size = 100
+    batch_size = 1000
     perms = list(itertools.permutations(words, 2))
 
     results = []
