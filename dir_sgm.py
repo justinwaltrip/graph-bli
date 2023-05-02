@@ -59,7 +59,7 @@ def load_wiki_data(lang):
     print(f"Loading wiki data for {lang}")
 
     # load wiki40b data for language
-    ds = tfds.load(f"wiki40b/{lang}", split="train[:10%]", data_dir="/scratch4/danielk/jwaltri2")
+    ds = tfds.load(f"wiki40b/{lang}", split="train[:10%]", data_dir="/scratch4/danielk/jwaltri2", download=False)
 
     # separate samples by special markers
     special_markers = [
@@ -83,19 +83,45 @@ def load_wiki_data(lang):
     return wiki_data
 
 
-def compute_unigram_counts(words, wiki_data):
+@ray.remote
+def count_unigrams(unigrams, wiki_data_id):
     """
-    Compute unigram counts for words in a language
+    Compute unigram count for words in a language
     """
+    # get wiki data from shared memory
+    wiki_data = ray.get(wiki_data_id)
+
     unigram_counts = {}
-    for w in tqdm.tqdm(words):
-        # compute monogram count for "w"
+    
+    for w in unigrams:
         count = 0
         for doc in wiki_data:
             # ensure w is not a substring of another word
             count += doc.count(f" {w} ")
         unigram_counts[w] = count
+    
+    return unigram_counts
 
+
+def compute_unigram_counts(words, wiki_data):
+    """
+    Compute unigram counts for words in a language
+    """
+    # put wiki data in shared memory
+    wiki_data_id = ray.put(wiki_data)
+
+    unigram_counts = {}
+
+    batch_size = 25
+
+    results = []
+    for i in range(math.ceil(len(words) / batch_size)):
+        unigrams = words[i * batch_size : (i + 1) * batch_size]
+        results.append(count_unigrams.remote(unigrams, wiki_data_id))
+    
+    for result in tqdm.tqdm(results):
+        unigram_counts.update(ray.get(result))
+    
     return unigram_counts
 
 
@@ -123,8 +149,6 @@ def compute_bigram_counts(words, wiki_data):
     """
     Compute bigram counts for words in a language
     """
-    ray.init(ignore_reinit_error=True)
-
     # put wiki data in shared memory
     wiki_data_id = ray.put(wiki_data)
 
@@ -616,6 +640,8 @@ def main(args):
     4. Run SGM on directed adjacency matrices
     5. Evaluate performance
     """
+    ray.init(num_cpus=4)
+
     src = args.src
     trg = args.trg
 
