@@ -52,14 +52,11 @@ def process_dict_pairs(pair_file):
     return pairs, l1_words, l2_words
 
 
-def load_wiki_data(lang):
-    """
-    Load fastText wiki data for relevant languages
-    """
-    print(f"Loading wiki data for {lang}")
-
+def process_wiki_data(lang):
     # load wiki40b data for language
-    ds = tfds.load(f"wiki40b/{lang}", split="train[:10%]", data_dir="/scratch4/danielk/jwaltri2", download=False)
+    ds = tfds.load(
+        f"wiki40b/{lang}", split="train[:10%]", data_dir="data", download=False
+    )
 
     # separate samples by special markers
     special_markers = [
@@ -77,29 +74,24 @@ def load_wiki_data(lang):
             text = text.replace(marker, "[SEP]")
         docs = list(filter(lambda x: x != "", text.split("[SEP]")))
         wiki_data.extend(docs)
-    
-    print(f"Loaded {len(wiki_data)} documents")
 
     return wiki_data
 
 
 @ray.remote
-def count_unigrams(unigrams, wiki_data_id):
+def count_unigrams(unigrams, wiki_data):
     """
     Compute unigram count for words in a language
     """
-    # get wiki data from shared memory
-    wiki_data = ray.get(wiki_data_id)
-
     unigram_counts = {}
-    
+
     for w in unigrams:
         count = 0
         for doc in wiki_data:
             # ensure w is not a substring of another word
             count += doc.count(f" {w} ")
         unigram_counts[w] = count
-    
+
     return unigram_counts
 
 
@@ -118,30 +110,27 @@ def compute_unigram_counts(words, wiki_data):
     for i in range(math.ceil(len(words) / batch_size)):
         unigrams = words[i * batch_size : (i + 1) * batch_size]
         results.append(count_unigrams.remote(unigrams, wiki_data_id))
-    
+
     for result in tqdm.tqdm(results):
         unigram_counts.update(ray.get(result))
-    
+
     return unigram_counts
 
 
 @ray.remote
-def count_bigrams(bigrams, wiki_data_id):
+def count_bigrams(bigrams, wiki_data):
     """
     Compute bigram count for words in a language
     """
-    # get wiki data from shared memory
-    wiki_data = ray.get(wiki_data_id)
-
     bigram_counts = {}
-    
+
     for w1, w2 in bigrams:
         count = 0
         for doc in wiki_data:
             # ensure w1 w2 are both not substrings of another word
             count += doc.count(f" {w1} {w2} ")
         bigram_counts[str((w1, w2))] = count
-    
+
     return bigram_counts
 
 
@@ -161,7 +150,7 @@ def compute_bigram_counts(words, wiki_data):
     for i in range(math.perm(len(words), 2) // batch_size + 1):
         bigrams = perms[i * batch_size : (i + 1) * batch_size]
         results.append(count_bigrams.remote(bigrams, wiki_data_id))
-    
+
     for result in tqdm.tqdm(results):
         bigram_counts.update(ray.get(result))
 
@@ -268,13 +257,13 @@ def get_adj_matrix(lang, words, unigram_counts, bigram_counts):
 
             # add directed edge from w2 to w1
             adj_matrix[w2_ix][w1_ix] = w1_given_w2
-        
+
         print(f"Saving adjacency matrix for {lang}")
 
         # save adjacency matrix
         with open(adj_matrix_path, "wb") as f:
             np.save(f, adj_matrix)
-    
+
     return adj_matrix
 
 
@@ -631,6 +620,31 @@ def create_train_dev_split(pairs, n_seeds, src_word2ind, trg_word2ind, rand=Fals
     return (train_pairs, dev_pairs), (train_inds, dev_inds)
 
 
+def get_wiki_data(lang):
+    """
+    Load wikipedia data for language
+    """
+    wiki_path = Path(f"wiki_data/{lang}.json")
+    wiki_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if wiki_path.exists():
+        print(f"Loading wiki data for {lang}")
+        with open(wiki_path) as f:
+            wiki_data = json.load(f)
+    else:
+        print(f"Processing wiki data for {lang}")
+
+        wiki_data = process_wiki_data(lang)
+
+        print(f"Saving wiki data for {lang}")
+
+        # save wiki data
+        with open(wiki_path, "w") as f:
+            json.dump(wiki_data, f, indent=4)
+
+    return wiki_data
+
+
 def main(args):
     """
     1. Load bilingual dictionaries for relvant language comparisons
@@ -670,7 +684,7 @@ def main(args):
     adj_matrices = {}
 
     for lang, words in [(src, src_words), (trg, trg_words)]:
-        wiki_data = load_wiki_data(lang)
+        wiki_data = get_wiki_data(lang)
 
         unigram_counts = get_unigram_counts(lang, words, wiki_data)
         bigram_counts = get_bigram_counts(lang, words, wiki_data)
