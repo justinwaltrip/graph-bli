@@ -55,7 +55,7 @@ def process_dict_pairs(pair_file):
 def process_wiki_data(lang):
     # load wiki40b data for language
     ds = tfds.load(
-        f"wiki40b/{lang}", split="train[:10%]", data_dir="data", download=False
+        f"wiki40b/{lang}", split="train[:5%]", data_dir="/scratch4/danielk/jwaltri2", download=False
     )
 
     # separate samples by special markers
@@ -654,29 +654,24 @@ def main(args):
     4. Run SGM on directed adjacency matrices
     5. Evaluate performance
     """
-    ray.init(num_cpus=4)
+    ray.init(num_cpus=32)
 
     src = args.src
     trg = args.trg
 
-    word_pairs, src_words, trg_words = process_dict_pairs(
+    word_pairs, _, _ = process_dict_pairs(
         f"dicts/{src}-{trg}/train/{src}-{trg}.0-5000.txt.1to1"
     )
 
-    # TODO remove 100 nodes per graph
-    word_pairs = word_pairs[:100]
+    # get source and target words
     src_words = [pair[0] for pair in word_pairs]
     trg_words = [pair[1] for pair in word_pairs]
 
     src_word2ind = {word: i for i, word in enumerate(src_words)}
     trg_word2ind = {word: i for i, word in enumerate(trg_words)}
 
-    # TODO remove 10 seeds
-    # _, (train_inds, dev_inds) = create_train_dev_split(
-    #     word_pairs, args.n_seeds, src_word2ind, trg_word2ind, args.randomize_seeds
-    # )
     _, (train_inds, dev_inds) = create_train_dev_split(
-        word_pairs, 10, src_word2ind, trg_word2ind, args.randomize_seeds
+        word_pairs, args.n_seeds, src_word2ind, trg_word2ind, args.randomize_seeds
     )
 
     gold_src_train_inds, gold_trg_train_inds = unzip_pairs(train_inds)
