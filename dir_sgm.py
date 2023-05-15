@@ -1,3 +1,6 @@
+from third_party.vecmap import embeddings
+from utils import csls
+from scipy import sparse
 import argparse
 import random
 import sgm
@@ -11,6 +14,198 @@ import itertools
 import tensorflow_datasets as tfds
 from utils import matops
 from third_party import combine_bidirectional_alignments
+
+
+def load_embs_and_wordpairs(args):
+    # Loads embeddings and input word pairs (vocabulary). Returns word pairs,
+    # source and target embeddings and word2ind dictionaries.
+    print("Loading embeddings and dictionary pairs...")
+    word_pairs, src_words, trg_words = process_dict_pairs(args.pairs)
+
+    available_word_pairs = []
+    # Read once to find available src/trg words from emb spaces.
+    with open(args.src_embs) as src_embs_file:
+        with open(args.trg_embs) as trg_embs_file:
+            available_src_words, _ = matops.read(
+                src_embs_file, args.max_embs, src_words
+            )
+            available_trg_words, _ = matops.read(
+                trg_embs_file, args.max_embs, trg_words
+            )
+            # Keep only pairs where src AND trg words are in emb spaces.
+            available_word_pairs = [
+                i
+                for i in word_pairs
+                if i[0] in available_src_words and i[1] in available_trg_words
+            ]
+    oov_word_pairs = set(word_pairs) - set(available_word_pairs)
+    src_words_to_use, trg_words_to_use = unzip_pairs(available_word_pairs)
+
+    with open(args.src_embs) as src_embs_file:
+        with open(args.trg_embs) as trg_embs_file:
+            # Re-read embs with only vocab where both sides of pair are present.
+            src_words_in_emb_order, src_embs = matops.read(
+                src_embs_file, args.max_embs, src_words_to_use
+            )
+            trg_words_in_emb_order, trg_embs = matops.read(
+                trg_embs_file, args.max_embs, trg_words_to_use
+            )
+
+            # These lines for *_word2ind copied from vecmap/.py
+            src_word2ind = {word: i for i, word in enumerate(src_words_in_emb_order)}
+            trg_word2ind = {word: i for i, word in enumerate(trg_words_in_emb_order)}
+            src_ind2word = {i: word for i, word in enumerate(src_words_in_emb_order)}
+            trg_ind2word = {i: word for i, word in enumerate(trg_words_in_emb_order)}
+
+            print("Done loading embeddings and dictionary pairs.")
+            return (
+                available_word_pairs,
+                src_embs,
+                src_word2ind,
+                src_ind2word,
+                trg_embs,
+                trg_word2ind,
+                trg_ind2word,
+                oov_word_pairs,
+            )
+
+
+def calculate_csls_scores(x, y, topk=-1):
+    # Returns a sparse matrix of topk CSLS scores.
+    csls_generator = csls.calculate_csls_scores(x, y, topk=topk)
+    return sparse.vstack(csls_generator)
+
+
+def iterative_procrustes_w_csls(
+    x,
+    y,
+    input_x_seed_inds=[],
+    input_y_seed_inds=[],
+    gold_x_seed_inds=[],
+    gold_y_seed_inds=[],
+    val_set=None,
+    max_seeds_to_add=-1,
+    curr_i=1,
+    total_i=10,
+    diff_seeds_for_rev=False,
+    k=1,
+    active_learning=False,
+    truth_for_active_learning=None,
+):
+    """Run Iterative Procrustes.
+
+    Dictionaries are induced as the nearest neighbor of each word in x
+    according to CSLS. The seed set for subsequent rounds is the
+    intersection of the dictionaries induced from both directions.
+
+    Args:
+        x: source embedding space.
+        y: target embedding space.
+        input_x_seed_inds: seed indicies to use in x space.
+        input_y_seed_inds: seed indicies to use in y space.
+        gold_x_seed_inds: gold seed indicies in x space.
+        gold_y_seed_inds: gold seed indicies in y space.
+        val_set: validation set as set of (x1, y1) tuples.
+        curr_i: current iteration number.
+        total_i: total number of iterations that will run.
+        k: how many hypotheses to return.
+        active_learning: If True, only hypotheses that are correct (either
+            in the train or dev set) used as seeds for next iteration.
+        truth_for_active_learning: True pairs to be be compared with for
+            active learning. If a hypothesis is in this set, use it.
+
+    Returns:
+        Hypothesized matches induced in fwd direction for all rows in x.
+        Hypothesized matches induced in rev direction for all rows in y.
+        Intersection of the above hypothesized matches.
+        (all are returned as sets of (x_position, y_position) tuples)
+    """
+
+    print("----------------------------------")
+    print("\nRound {0} of Iterative Procrustes".format(curr_i))
+    print("\tNum input seeds:", len(input_x_seed_inds))
+    print("\tNum gold seeds:", len(gold_x_seed_inds))
+
+    x_seed_inds, y_seed_inds = unzip_pairs(
+        get_seeds(
+            input_x_seed_inds,
+            input_y_seed_inds,
+            gold_x_seed_inds,
+            gold_y_seed_inds,
+            max_seeds_to_add,
+            curr_i,
+            total_i,
+            True,
+        )
+    )
+    print("\tNum combined input seeds:", len(x_seed_inds))
+
+    w = solve_procrustes(x[x_seed_inds], y[y_seed_inds])
+    csls_scores_sparse = calculate_csls_scores(x @ w, y, topk=k)
+    x_hyp_pos, y_hyp_pos, val = sparse.find(csls_scores_sparse)
+
+    if diff_seeds_for_rev:
+        print("Getting different seeds for reverse direction.")
+        x_seed_inds, y_seed_inds = unzip_pairs(
+            get_seeds(
+                input_x_seed_inds,
+                input_y_seed_inds,
+                gold_x_seed_inds,
+                gold_y_seed_inds,
+                max_seeds_to_add,
+                curr_i,
+                total_i,
+                True,
+            )
+        )
+    w_rev = solve_procrustes(y[y_seed_inds], x[x_seed_inds])
+    csls_scores_sparse_rev = calculate_csls_scores(y @ w_rev, x, topk=k)
+    y_hyp_pos_rev, x_hyp_pos_rev, val = sparse.find(csls_scores_sparse_rev)
+
+    hyps = set(zip(x_hyp_pos, y_hyp_pos))
+    hyps_rev = set(zip(x_hyp_pos_rev, y_hyp_pos_rev))
+    hyps_int = symmetrize(hyps, hyps_rev, "intersection")
+
+    if val_set:
+        eval_symm(val_set, hyps, hyps_rev, hyps_int)
+
+    if curr_i == total_i:
+        return hyps, hyps_rev, hyps_int, w, w_rev
+
+    curr_i += 1
+    if active_learning:
+        correct_hyps = set(truth_for_active_learning).intersection(hyps)
+        correct_hyps_rev = set(truth_for_active_learning).intersection(hyps_rev)
+        joint_x_hyp_pos, joint_y_hyp_pos = unzip_pairs(
+            correct_hyps.union(correct_hyps_rev)
+        )
+    else:
+        joint_x_hyp_pos, joint_y_hyp_pos = unzip_pairs(hyps_int)
+    return iterative_procrustes_w_csls(
+        x,
+        y,
+        joint_x_hyp_pos,
+        joint_y_hyp_pos,
+        gold_x_seed_inds,
+        gold_y_seed_inds,
+        val_set,
+        max_seeds_to_add,
+        curr_i,
+        total_i,
+        diff_seeds_for_rev,
+        k,
+        active_learning,
+        truth_for_active_learning,
+    )
+
+
+def solve_procrustes(x, y):
+    # x = np.asarray(x)
+    # y = np.asarray(y)
+
+    u, s, vt = np.linalg.svd(y.T @ x)
+    w = vt.T @ u.T
+    return w
 
 
 def symmetrize(hyps, hyps_rev, heuristic):
@@ -55,7 +250,10 @@ def process_dict_pairs(pair_file):
 def process_wiki_data(lang):
     # load wiki40b data for language
     ds = tfds.load(
-        f"wiki40b/{lang}", split="train[:1%]", data_dir="/scratch4/danielk/jwaltri2", download=False
+        f"wiki40b/{lang}",
+        split="train[:1%]",
+        data_dir="/scratch4/danielk/jwaltri2",
+        download=False,
     )
 
     # separate samples by special markers
@@ -654,21 +852,40 @@ def main(args):
     4. Run SGM on directed adjacency matrices
     5. Evaluate performance
     """
-    ray.init(num_cpus=64)
+    # ray.init(num_cpus=64)
 
     src = args.src
     trg = args.trg
 
-    word_pairs, _, _ = process_dict_pairs(
+    (
+        word_pairs,
+        src_embs,
+        src_word2ind,
+        src_ind2word,
+        trg_embs,
+        trg_word2ind,
+        trg_ind2word,
+        oov_word_pairs,
+    ) = load_embs_and_wordpairs(args)
+
+    # Normalize embeddings in-place.
+    print("Normalizing embeddings...")
+    embeddings.normalize(src_embs, args.norm)
+    embeddings.normalize(trg_embs, args.norm)
+    print("Done normalizing embeddings.")
+
+    old_word_pairs, _, _ = process_dict_pairs(
         f"dicts/{src}-{trg}/train/{src}-{trg}.0-5000.txt.1to1"
     )
 
     # get source and target words
-    src_words = [pair[0] for pair in word_pairs]
-    trg_words = [pair[1] for pair in word_pairs]
+    src_words = [pair[0] for pair in old_word_pairs]
+    trg_words = [pair[1] for pair in old_word_pairs]
 
-    src_word2ind = {word: i for i, word in enumerate(src_words)}
-    trg_word2ind = {word: i for i, word in enumerate(trg_words)}
+    # old_src_word2ind = {word: i for i, word in enumerate(src_words)}
+    # old_trg_word2ind = {word: i for i, word in enumerate(trg_words)}
+    old_src_ind2word = {i: word for i, word in enumerate(src_words)}
+    old_trg_ind2word = {i: word for i, word in enumerate(trg_words)}
 
     _, (train_inds, dev_inds) = create_train_dev_split(
         word_pairs, args.n_seeds, src_word2ind, trg_word2ind, args.randomize_seeds
@@ -679,21 +896,73 @@ def main(args):
     adj_matrices = {}
 
     for lang, words in [(src, src_words), (trg, trg_words)]:
-        wiki_data = get_wiki_data(lang)
+        # wiki_data = get_wiki_data(lang)
 
-        unigram_counts = get_unigram_counts(lang, words, wiki_data)
-        bigram_counts = get_bigram_counts(lang, words, wiki_data)
+        # unigram_counts = get_unigram_counts(lang, words, wiki_data)
+        # bigram_counts = get_bigram_counts(lang, words, wiki_data)
+        unigram_counts = None
+        bigram_counts = None
 
         # save word indices used for adjacency matrix
-        save_word_indices(lang, words)
+        # save_word_indices(lang, words)
 
         # compute adjacency matrix
         adj_matrices[lang] = get_adj_matrix(lang, words, unigram_counts, bigram_counts)
 
+    # import matplotlib.pyplot as plt
+
+    # bins = np.float_power(10, np.arange(-5, 1))
+    # plt.xscale("log")
+    # plt.hist(adj_matrices[src].ravel(), bins=bins)
+    # plt.show()
+
+    for adj_matrix in adj_matrices.values():
+        # adj_matrix[adj_matrix < threshold] = 0
+        adj_matrix[adj_matrix < args.thresh] = 0
+
+    # import matplotlib.pyplot as plt
+
+    # bins = np.float_power(10, np.arange(-5, 1))
+    # plt.xscale("log")
+    # plt.hist(adj_matrices[src].ravel(), bins=bins)
+    # plt.show()
+
+    # Make similarity matrices.
+    xxT = src_embs @ src_embs.T
+    yyT = trg_embs @ trg_embs.T
+
+    # bugfix because somehow the indices are not the same for some reason
+    # permuate target adjacency matrix to match trg_word2ind
+    updated_src_adj_matrix = np.zeros_like(adj_matrices[src])
+    for row in range(adj_matrices[src].shape[0]):
+        for col in range(adj_matrices[src].shape[1]):
+            updated_src_adj_matrix[src_word2ind[old_src_ind2word[row]]][
+                src_word2ind[old_src_ind2word[col]]
+            ] = adj_matrices[src][row][col]
+    adj_matrices[src] = updated_src_adj_matrix
+
+    updated_trg_adj_matrix = np.zeros_like(adj_matrices[trg])
+    for row in range(adj_matrices[trg].shape[0]):
+        for col in range(adj_matrices[trg].shape[1]):
+            updated_trg_adj_matrix[trg_word2ind[old_trg_ind2word[row]]][
+                trg_word2ind[old_trg_ind2word[col]]
+            ] = adj_matrices[trg][row][col]
+    adj_matrices[trg] = updated_trg_adj_matrix
+
+    # multiply xxT and yyT with adj matrix values where nonzero
+    xxT[adj_matrices[src] > 0] = np.multiply(
+        adj_matrices[src][adj_matrices[src] > 0], xxT[adj_matrices[src] > 0]
+    )
+    yyT[adj_matrices[trg] > 0] = np.multiply(
+        adj_matrices[trg][adj_matrices[trg] > 0], yyT[adj_matrices[trg] > 0]
+    )
+
     # run SGM on adjacency matrices
     hyps, _, _ = iterative_softsgm(
-        adj_matrices[src],
-        adj_matrices[trg],
+        xxT,
+        yyT,
+        # adj_matrices[src],
+        # adj_matrices[trg],
         gold_src_train_inds,
         gold_trg_train_inds,
         gold_src_train_inds,
@@ -710,6 +979,22 @@ def main(args):
         truth_for_active_learning=set(train_inds + dev_inds),
     )
 
+    # hyps, _, _, _, _ = iterative_procrustes_w_csls(
+    #     adj_matrices[src],
+    #     adj_matrices[trg],
+    #     gold_src_train_inds,
+    #     gold_trg_train_inds,
+    #     gold_src_train_inds,
+    #     gold_trg_train_inds,
+    #     dev_inds,
+    #     args.new_nseeds_per_round,
+    #     total_i=args.proc_iters,
+    #     diff_seeds_for_rev=args.diff_seeds_for_rev,
+    #     k=args.k,
+    #     active_learning=args.active_learning,
+    #     truth_for_active_learning=set(train_inds + dev_inds),
+    # )
+
     dev_src_inds, dev_trg_inds = unzip_pairs(dev_inds)
     dev_hyps = set(hyp for hyp in hyps if hyp[0] in dev_src_inds)
     matches, precision, recall = eval(dev_hyps, dev_inds)
@@ -723,6 +1008,12 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LAP Experiments")
+    parser.add_argument(
+        "--src-embs", metavar="PATH", required=True, help="Path to source embeddings."
+    )
+    parser.add_argument(
+        "--trg-embs", metavar="PATH", required=True, help="Path to target embeddings."
+    )
     parser.add_argument(
         "--src",
         type=str,
@@ -803,6 +1094,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether or not to do active learning",
     )
+    parser.add_argument(
+        "--norm",
+        metavar="N",
+        choices=["noop", "unit", "center"],
+        nargs="+",
+        required=True,
+        help="How to normalize embeddings (can take multiple args)",
+    )
+    parser.add_argument("--thresh", type=float, default=0.0, help="Threshold")
 
     args = parser.parse_args()
 

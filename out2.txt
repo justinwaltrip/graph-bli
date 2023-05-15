@@ -1,0 +1,168 @@
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:25:15
+Unshuffle round end time: 05/14/23 23:25:18
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.7508%  Recall 74.7508%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 675 
+	(Precision; 74.7508%) (Recall: 74.7508%)
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:26:17
+Unshuffle round end time: 05/14/23 23:26:19
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.7508%  Recall 74.7508%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 675 
+	(Precision; 74.7508%) (Recall: 74.7508%)
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:27:17
+Unshuffle round end time: 05/14/23 23:27:20
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.7508%  Recall 74.7508%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 675 
+	(Precision; 74.7508%) (Recall: 74.7508%)
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:28:18
+Unshuffle round end time: 05/14/23 23:28:20
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.6401%  Recall 74.6401%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 674 
+	(Precision; 74.6401%) (Recall: 74.6401%)
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:29:18
+Unshuffle round end time: 05/14/23 23:29:21
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.3079%  Recall 74.3079%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 671 
+	(Precision; 74.3079%) (Recall: 74.3079%)
+Loading embeddings and dictionary pairs...
+Done loading embeddings and dictionary pairs.
+Normalizing embeddings...
+Done normalizing embeddings.
+Creating the train/dev split given input seeds...
+Done creating the train/dev split given input seeds.
+Loading adjacency matrix for en
+Loading adjacency matrix for de
+----------------------------------
+
+Round 1 of Iterative SoftSGM
+
+----------------------------------
+Choosing Seeds...
+	# of seeds available: 4000
+	# of seeds chosen for round 1: 4000
+Running SoftSGM Forward
+Running SoftSGM Topk.
+Unshuffle round start time: 05/14/23 23:30:19
+Unshuffle round end time: 05/14/23 23:30:22
+Evalling Forward
+	Length of hypotheses: 903
+	Length of test set: 903
+	Precision: 74.1971%  Recall 74.1971%
+	Length of hypotheses: 903
+	Length of test set: 903
+	Dev Pairs matched: 670 
+	(Precision; 74.1971%) (Recall: 74.1971%)

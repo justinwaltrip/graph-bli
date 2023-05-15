@@ -8,6 +8,7 @@
 
 import argparse
 import numpy as np
+
 # import cupy as cp
 import random
 from utils import csls
@@ -604,6 +605,138 @@ def get_topk_hypotheses_from_probdist(hyp_probdist, k=1, minprob=0.0):
     return hyps
 
 
+def solve_procrustes(x, y):
+    # x = np.asarray(x)
+    # y = np.asarray(y)
+
+    u, s, vt = np.linalg.svd(y.T @ x)
+    w = vt.T @ u.T
+    return w
+
+
+def iterative_procrustes_w_csls(
+    x,
+    y,
+    input_x_seed_inds=[],
+    input_y_seed_inds=[],
+    gold_x_seed_inds=[],
+    gold_y_seed_inds=[],
+    val_set=None,
+    max_seeds_to_add=-1,
+    curr_i=1,
+    total_i=10,
+    diff_seeds_for_rev=False,
+    k=1,
+    active_learning=False,
+    truth_for_active_learning=None,
+):
+    """Run Iterative Procrustes.
+
+    Dictionaries are induced as the nearest neighbor of each word in x
+    according to CSLS. The seed set for subsequent rounds is the
+    intersection of the dictionaries induced from both directions.
+
+    Args:
+        x: source embedding space.
+        y: target embedding space.
+        input_x_seed_inds: seed indicies to use in x space.
+        input_y_seed_inds: seed indicies to use in y space.
+        gold_x_seed_inds: gold seed indicies in x space.
+        gold_y_seed_inds: gold seed indicies in y space.
+        val_set: validation set as set of (x1, y1) tuples.
+        curr_i: current iteration number.
+        total_i: total number of iterations that will run.
+        k: how many hypotheses to return.
+        active_learning: If True, only hypotheses that are correct (either
+            in the train or dev set) used as seeds for next iteration.
+        truth_for_active_learning: True pairs to be be compared with for
+            active learning. If a hypothesis is in this set, use it.
+
+    Returns:
+        Hypothesized matches induced in fwd direction for all rows in x.
+        Hypothesized matches induced in rev direction for all rows in y.
+        Intersection of the above hypothesized matches.
+        (all are returned as sets of (x_position, y_position) tuples)
+    """
+
+    print("----------------------------------")
+    print("\nRound {0} of Iterative Procrustes".format(curr_i))
+    print("\tNum input seeds:", len(input_x_seed_inds))
+    print("\tNum gold seeds:", len(gold_x_seed_inds))
+
+    x_seed_inds, y_seed_inds = unzip_pairs(
+        get_seeds(
+            input_x_seed_inds,
+            input_y_seed_inds,
+            gold_x_seed_inds,
+            gold_y_seed_inds,
+            max_seeds_to_add,
+            curr_i,
+            total_i,
+            True,
+        )
+    )
+    print("\tNum combined input seeds:", len(x_seed_inds))
+
+    w = solve_procrustes(x[x_seed_inds], y[y_seed_inds])
+    csls_scores_sparse = calculate_csls_scores(x @ w, y, topk=k)
+    x_hyp_pos, y_hyp_pos, val = sparse.find(csls_scores_sparse)
+
+    if diff_seeds_for_rev:
+        print("Getting different seeds for reverse direction.")
+        x_seed_inds, y_seed_inds = unzip_pairs(
+            get_seeds(
+                input_x_seed_inds,
+                input_y_seed_inds,
+                gold_x_seed_inds,
+                gold_y_seed_inds,
+                max_seeds_to_add,
+                curr_i,
+                total_i,
+                True,
+            )
+        )
+    w_rev = solve_procrustes(y[y_seed_inds], x[x_seed_inds])
+    csls_scores_sparse_rev = calculate_csls_scores(y @ w_rev, x, topk=k)
+    y_hyp_pos_rev, x_hyp_pos_rev, val = sparse.find(csls_scores_sparse_rev)
+
+    hyps = set(zip(x_hyp_pos, y_hyp_pos))
+    hyps_rev = set(zip(x_hyp_pos_rev, y_hyp_pos_rev))
+    hyps_int = symmetrize(hyps, hyps_rev, "intersection")
+
+    if val_set:
+        eval_symm(val_set, hyps, hyps_rev, hyps_int)
+
+    if curr_i == total_i:
+        return hyps, hyps_rev, hyps_int, w, w_rev
+
+    curr_i += 1
+    if active_learning:
+        correct_hyps = set(truth_for_active_learning).intersection(hyps)
+        correct_hyps_rev = set(truth_for_active_learning).intersection(hyps_rev)
+        joint_x_hyp_pos, joint_y_hyp_pos = unzip_pairs(
+            correct_hyps.union(correct_hyps_rev)
+        )
+    else:
+        joint_x_hyp_pos, joint_y_hyp_pos = unzip_pairs(hyps_int)
+    return iterative_procrustes_w_csls(
+        x,
+        y,
+        joint_x_hyp_pos,
+        joint_y_hyp_pos,
+        gold_x_seed_inds,
+        gold_y_seed_inds,
+        val_set,
+        max_seeds_to_add,
+        curr_i,
+        total_i,
+        diff_seeds_for_rev,
+        k,
+        active_learning,
+        truth_for_active_learning,
+    )
+
+
 def main(args):
     # Process data. Get train/dev split, seeds.
     (
@@ -658,24 +791,23 @@ def main(args):
         )
 
     if args.function == "proc":
-        # print("Running Procrustes", flush=True)
-        # print("args.proc_iters:", args.proc_iters, flush=True)
-        # hyps, _, _, _, _ = iterative_procrustes_w_csls(
-        #     src_embs,
-        #     trg_embs,
-        #     gold_src_train_inds,
-        #     gold_trg_train_inds,
-        #     gold_src_train_inds,
-        #     gold_trg_train_inds,
-        #     dev_inds,
-        #     args.new_nseeds_per_round,
-        #     total_i=args.proc_iters,
-        #     diff_seeds_for_rev=args.diff_seeds_for_rev,
-        #     k=args.k,
-        #     active_learning=args.active_learning,
-        #     truth_for_active_learning=set(train_inds + dev_inds),
-        # )
-        raise NotImplementedError
+        print("Running Procrustes", flush=True)
+        print("args.proc_iters:", args.proc_iters, flush=True)
+        hyps, _, _, _, _ = iterative_procrustes_w_csls(
+            src_embs,
+            trg_embs,
+            gold_src_train_inds,
+            gold_trg_train_inds,
+            gold_src_train_inds,
+            gold_trg_train_inds,
+            dev_inds,
+            args.new_nseeds_per_round,
+            total_i=args.proc_iters,
+            diff_seeds_for_rev=args.diff_seeds_for_rev,
+            k=args.k,
+            active_learning=args.active_learning,
+            truth_for_active_learning=set(train_inds + dev_inds),
+        )
 
     print("----------------------------------")
     print("\nFinal Forward Eval:")
