@@ -143,7 +143,7 @@ def compute_bigram_counts(words, wiki_data):
 
     bigram_counts = {}
 
-    batch_size = 1000
+    batch_size = 5000
     perms = list(itertools.permutations(words, 2))
 
     results = []
@@ -642,7 +642,7 @@ def get_wiki_data(lang):
         with open(wiki_path, "w") as f:
             json.dump(wiki_data, f, indent=4)
 
-    return wiki_data
+    return wiki_data[:100000]
 
 
 def main(args):
@@ -654,7 +654,7 @@ def main(args):
     4. Run SGM on directed adjacency matrices
     5. Evaluate performance
     """
-    ray.init(num_cpus=32)
+    ray.init(num_cpus=64)
 
     src = args.src
     trg = args.trg

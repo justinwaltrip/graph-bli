@@ -8,3 +8,4 @@ scikit-learn
 beartype
 graspologic
 apache-beam[gcp]
+numpy
